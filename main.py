@@ -13,9 +13,9 @@ import json
 st.set_page_config(layout="wide", page_title="KarmaOpsAI", page_icon=":bar_chart:")
 
 # Environment variables for database and OpenAI API key
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+os.environ["OPENAI_API_KEY"] = "API KEY"
 db_user = os.getenv("DB_USER", "postgres")
-db_password = os.getenv("DB_PASSWORD", "mysecretpassword")
+db_password = os.getenv("DB_PASSWORD", "delusional")
 db_host = os.getenv("DB_HOST", "localhost")
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "postgres")
@@ -34,48 +34,49 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
         for table, columns in tables.items():
             context += f"Schema: {schema}, Table: {table}, Columns: {', '.join(columns)}\n"
 
+    # Add predefined context and rules here
     context += """
-        Important calculation rules and definitions:
-        1. Utilization is Gallons delivered by Tank Size. Delivered volume should be taken from delivery_report. Don't take repetitive customer names and ignore null values.
-        2. Here based on last fill means last time total gallons was delivered by tank size.
-        3. Overall Utilization means Average of Total fill in the lifetime of the tank at the customer location by tank size.
-        4. Last 5 fill average is the last 5 fill average of gallons delivered by tank size in the customer location.
-            Identify the worst assets as the ones with the lowest utilization percentages in each category, 
-            the worst assets can be calculated on the basis of last fill utilization or last 5 fill utilization or overall utilization according to the prompt.
-        5. For asset types:
-           - Rental Assets: Assets marked as rental in the asset_type column
-           - Customer Assets: Assets marked as customer-owned
-           - Delivery Assets: Assets related to delivery operations
-        6. When calculating days between fills, use the delivery dates.
-        7. For customer locations, use the location table.
-        8. For delivery volume buckets use: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
-        9. If "State" is requested, extract it from the "address" column using string manipulation.
-        10. When something related to customers is asked, try to answer it from the cleaned customer locations table, apply join conditions however required, and see if you need anything from the cleaned customers list.
-        11. Dry runs are the unsuccessful fills like a driver went for delivery but didn't fill any fuel.
-        12. Don't use LIMIT 5 in queries unless mentioned.
-        13. Avoid using aggregate functions (like AVG) directly with window functions (like LAG). Instead, calculate window function results in a subquery or CTE and apply the aggregate function in the outer query.
-        14. Ignore null values if not crucial.
-        15. Basic filters refer to the criteria applied to narrow down data for analysis:
-            - **Date Range:** Apply filters to analyze data by daily, weekly, monthly, or custom date ranges.
-            - **By Hubs:** Filter data by specific operational hubs or regions.Get Hub's name from Hubs table for that try to create an indirect join of delivery report and hubs.
-            - **By Drivers:** Select records pertaining to specific drivers based on driver IDs or names.
-            - **By Customers:** Filter by specific customers or groups of customers.
-            - **By Customer and Customer Locations:** Analyze data at the customer level and their respective locations.
-            - **Volume Filters:** Use predefined delivery volume ranges (e.g., 1-100, 100-500 gallons).
-            - **Status Filters:** Exclude or include records based on statuses like completed, pending, or canceled.
-            - **Utilization Filters:** Narrow down records where utilization falls below a specified threshold.
-            - **Null Handling:** Exclude or include null values as needed based on the analysis requirement.
-        16. To enhance the SQL query:
-            - Use subqueries or Common Table Expressions (CTEs) to preprocess data in the intermediary table and verify the accuracy of the join before aggregating data.
-            - Ensure grouping is applied after all necessary joins to maintain the accuracy of the aggregated data.
-        17. Get data from delivery report for comparative Analysis Rules
-            - Total Stops = COUNT(DISTINCT delivery_id) per date
-            - Total Gallons = SUM(Volume) per date
-            - Time Periods:
-                - Weekly: Current (last 7 days) vs Previous (7 days before that)
-                - Monthly: Current calendar month vs Previous calendar month
-                - Quarterly: Current calendar quarter vs Previous calendar quarter.
-        """
+            Important calculation rules and definitions:
+            1. Utilization is Gallons delivered by Tank Size. Delivered volume should be taken from delivery_report. Don't take repetitive customer names and ignore null values.
+            2. Here based on last fill means last time total gallons was delivered by tank size.
+            3. Overall Utilization means Average of Total fill in the lifetime of the tank at the customer location by tank size.
+            4. Last 5 fill average is the last 5 fill average of gallons delivered by tank size in the customer location.
+                Identify the worst assets as the ones with the lowest utilization percentages in each category, 
+                the worst assets can be calculated on the basis of last fill utilization or last 5 fill utilization or overall utilization according to the prompt.
+            5. For asset types:
+               - Rental Assets: Assets marked as rental in the asset_type column
+               - Customer Assets: Assets marked as customer-owned
+               - Delivery Assets: Assets related to delivery operations
+            6. When calculating days between fills, use the delivery dates.
+            7. For customer locations, use the location table.
+            8. For delivery volume buckets use: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
+            9. If "State" is requested, extract it from the "address" column using string manipulation.
+            10. When something related to customers is asked, try to answer it from the cleaned customer locations table, apply join conditions however required, and see if you need anything from the cleaned customers list.
+            11. Dry runs are the unsuccessful fills like a driver went for delivery but didn't fill any fuel.
+            12. Don't use LIMIT 5 in queries unless mentioned.
+            13. Avoid using aggregate functions (like AVG) directly with window functions (like LAG). Instead, calculate window function results in a subquery or CTE and apply the aggregate function in the outer query.
+            14. Ignore null values if not crucial.
+            15. Basic filters refer to the criteria applied to narrow down data for analysis:
+                - **Date Range:** Apply filters to analyze data by daily, weekly, monthly, or custom date ranges.
+                - **By Hubs:** Filter data by specific operational hubs or regions.Get Hub's name from Hubs table for that try to create an indirect join of delivery report and hubs.
+                - **By Drivers:** Select records pertaining to specific drivers based on driver IDs or names.
+                - **By Customers:** Filter by specific customers or groups of customers.
+                - **By Customer and Customer Locations:** Analyze data at the customer level and their respective locations.
+                - **Volume Filters:** Use predefined delivery volume ranges (e.g., 1-100, 100-500 gallons).
+                - **Status Filters:** Exclude or include records based on statuses like completed, pending, or canceled.
+                - **Utilization Filters:** Narrow down records where utilization falls below a specified threshold.
+                - **Null Handling:** Exclude or include null values as needed based on the analysis requirement.
+            16. To enhance the SQL query:
+                - Use subqueries or Common Table Expressions (CTEs) to preprocess data in the intermediary table and verify the accuracy of the join before aggregating data.
+                - Ensure grouping is applied after all necessary joins to maintain the accuracy of the aggregated data.
+            17. Get data from delivery report for comparative Analysis Rules
+                - Total Stops = COUNT(DISTINCT delivery_id) per date
+                - Total Gallons = SUM(Volume) per date
+                - Time Periods:
+                    - Weekly: Current (last 7 days) vs Previous (7 days before that)
+                    - Monthly: Current calendar month vs Previous calendar month
+                    - Quarterly: Current calendar quarter vs Previous calendar quarter.
+            """
 
     if contextual_memory:
         context += "\nPrevious queries and answers:\n"
@@ -84,15 +85,15 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
 
     context += f"\nQuestion: {question}\nGenerate an accurate SQL query that:\n"
     context += """
-    1. Uses proper JOINs between tables
-    2. Handles NULL values appropriately
-    3. Includes correct aggregation functions when needed
-    4. Uses CASE statements for buckets/ranges
-    5. Only returns necessary columns
-    6. Uses proper date/time functions when needed
-    7. Includes appropriate WHERE clauses
-    8. Don't use LIMIT 5 in query unless mentioned.
-    Only provide the SQL query, nothing else."""
+        1. Uses proper JOINs between tables
+        2. Handles NULL values appropriately
+        3. Includes correct aggregation functions when needed
+        4. Uses CASE statements for buckets/ranges
+        5. Only returns necessary columns
+        6. Uses proper date/time functions when needed
+        7. Includes appropriate WHERE clauses
+        8. Don't use LIMIT 5 in query unless mentioned.
+        Only provide the SQL query, nothing else."""
 
     return context
 
@@ -125,7 +126,9 @@ if "contextual_memory" not in st.session_state:
     st.session_state.contextual_memory = []  # List to store query-answer pairs for context
 
 # Streamlit app
-st.title("KarmaOpsAI: Conversational Insights")
+st.title(":bar_chart: KarmaOpsAI: Conversational Insights")
+st.markdown("### Your AI-powered analytics assistant")
+st.divider()
 
 # Create two columns for layout
 col1, col2 = st.columns([10, 1])  # Adjust width ratio (memory icon smaller)
@@ -137,7 +140,7 @@ with col2:
 
 # Column 1: Input and query results
 with col1:
-    st.subheader("Ask a Question")
+    st.subheader(":speech_balloon: Ask a Question")
     question = st.text_input("Enter your question:", "")
 
     if question:
@@ -152,9 +155,8 @@ with col1:
 
                 if isinstance(query_result, str):
                     sql_query = query_result
-                    print(query_result)
                 else:
-                    raise ValueError(f"Unexpected query result format: {query_result}")
+                    raise ValueError("Unexpected query result format")
 
                 # Execute the SQL query
                 with engine.connect() as connection:
@@ -164,11 +166,9 @@ with col1:
 
                     # Convert rows to JSON
                     json_result = [dict(zip(columns, row)) for row in rows]
-                    # Display the result
-                    st.success("Query executed successfully!")
+
                     if json_result:
                         df = pd.DataFrame(json_result)
-                        # Display table and visualization side by side
                         table_col, graph_col = st.columns(2)
 
                         with table_col:
@@ -205,7 +205,6 @@ with col1:
 
                             st.plotly_chart(fig)
 
-                        # Append to memory
                         st.session_state.memory.append({
                             "question": question,
                             "dataframe": df,
@@ -214,14 +213,16 @@ with col1:
                             "answer": json_result
                         })
                     else:
-                        st.warning("No results found for the query.")
+                        st.warning(":exclamation: No results found for the query.")
 
+            except ValueError as ve:
+                st.warning(f":exclamation: {ve}")
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f":x: Something went wrong. Please check your question or try again later.")
 
 # Toggle memory section visibility
 if st.session_state.show_memory:
-    st.subheader("Session Memory")
+    st.subheader(":notebook_with_decorative_cover: Session Memory")
     for i, item in enumerate(st.session_state.memory):
         st.markdown(f"### Query {i + 1}: {item['question']}")
         memory_table_col, memory_graph_col = st.columns(2)
