@@ -12,19 +12,10 @@ import json
 # Set wide layout
 st.set_page_config(layout="wide", page_title="KarmaOpsAI", page_icon=":bar_chart:")
 
-from sqlalchemy import create_engine
-
-engine = create_engine(
-    "postgresql+psycopg2://postgres:delusional@localhost/postgres",
-    pool_size=10,  # Maximum number of connections in the pool
-    max_overflow=5,  # Additional connections to open if the pool is full
-    pool_timeout=30,  # Wait time before a timeout error
-)
-
 # Environment variables for database and OpenAI API key
-os.environ["OPENAI_API_KEY"] = ''
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 db_user = os.getenv("DB_USER", "postgres")
-db_password = os.getenv("DB_PASSWORD", "delusional")
+db_password = os.getenv("DB_PASSWORD", "mysecretpassword")
 db_host = os.getenv("DB_HOST", "localhost")
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "postgres")
@@ -36,7 +27,6 @@ db = SQLDatabase(engine)
 # Initialize the ChatOpenAI model
 llm = ChatOpenAI(model="gpt-4", temperature=0)
 
-
 # Function to create a contextual prompt
 def create_contextual_prompt(question, tables_info, contextual_memory):
     context = "The database has the following tables and their columns:\n"
@@ -44,67 +34,67 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
         for table, columns in tables.items():
             context += f"Schema: {schema}, Table: {table}, Columns: {', '.join(columns)}\n"
 
+    context += """
+        Important calculation rules and definitions:
+        1. Utilization is Gallons delivered by Tank Size. Delivered volume should be taken from delivery_report. Don't take repetitive customer names and ignore null values.
+        2. Here based on last fill means last time total gallons was delivered by tank size.
+        3. Overall Utilization means Average of Total fill in the lifetime of the tank at the customer location by tank size.
+        4. Last 5 fill average is the last 5 fill average of gallons delivered by tank size in the customer location.
+            Identify the worst assets as the ones with the lowest utilization percentages in each category, 
+            the worst assets can be calculated on the basis of last fill utilization or last 5 fill utilization or overall utilization according to the prompt.
+        5. For asset types:
+           - Rental Assets: Assets marked as rental in the asset_type column
+           - Customer Assets: Assets marked as customer-owned
+           - Delivery Assets: Assets related to delivery operations
+        6. When calculating days between fills, use the delivery dates.
+        7. For customer locations, use the location table.
+        8. For delivery volume buckets use: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
+        9. If "State" is requested, extract it from the "address" column using string manipulation.
+        10. When something related to customers is asked, try to answer it from the cleaned customer locations table, apply join conditions however required, and see if you need anything from the cleaned customers list.
+        11. Dry runs are the unsuccessful fills like a driver went for delivery but didn't fill any fuel.
+        12. Don't use LIMIT 5 in queries unless mentioned.
+        13. Avoid using aggregate functions (like AVG) directly with window functions (like LAG). Instead, calculate window function results in a subquery or CTE and apply the aggregate function in the outer query.
+        14. Ignore null values if not crucial.
+        15. Basic filters refer to the criteria applied to narrow down data for analysis:
+            - **Date Range:** Apply filters to analyze data by daily, weekly, monthly, or custom date ranges.
+            - **By Hubs:** Filter data by specific operational hubs or regions.Get Hub's name from Hubs table for that try to create an indirect join of delivery report and hubs.
+            - **By Drivers:** Select records pertaining to specific drivers based on driver IDs or names.
+            - **By Customers:** Filter by specific customers or groups of customers.
+            - **By Customer and Customer Locations:** Analyze data at the customer level and their respective locations.
+            - **Volume Filters:** Use predefined delivery volume ranges (e.g., 1-100, 100-500 gallons).
+            - **Status Filters:** Exclude or include records based on statuses like completed, pending, or canceled.
+            - **Utilization Filters:** Narrow down records where utilization falls below a specified threshold.
+            - **Null Handling:** Exclude or include null values as needed based on the analysis requirement.
+        16. To enhance the SQL query:
+            - Use subqueries or Common Table Expressions (CTEs) to preprocess data in the intermediary table and verify the accuracy of the join before aggregating data.
+            - Ensure grouping is applied after all necessary joins to maintain the accuracy of the aggregated data.
+        17. Get data from delivery report for comparative Analysis Rules
+            - Total Stops = COUNT(DISTINCT delivery_id) per date
+            - Total Gallons = SUM(Volume) per date
+            - Time Periods:
+                - Weekly: Current (last 7 days) vs Previous (7 days before that)
+                - Monthly: Current calendar month vs Previous calendar month
+                - Quarterly: Current calendar quarter vs Previous calendar quarter.
+        """
+
     if contextual_memory:
         context += "\nPrevious queries and answers:\n"
         for i, memory in enumerate(contextual_memory):
             context += f"Query {i + 1}: {memory['question']}\nAnswer {i + 1}: {memory['answer']}\n"
 
-    context = (
-        "You are a veteran in creating queries for SQL in Postgres. "
-        f"Question: {question}\n"
-        "Generate an accurate SQL query based on the following important calculation rules and definitions:\n\n"
-        "Important calculation rules and definitions:\n"
-        "1. Utilization is calculated as Gallons delivered divided by Tank Size. Delivered volume should be taken from "
-        "the `delivery_report` table. Avoid repetitive customer names and ignore null values.\n"
-        "2. 'Based on last fill' means the last time total gallons were delivered by tank size.\n"
-        "3. Overall Utilization refers to the average total fill in the lifetime of the tank at the customer location "
-        "by tank size.\n"
-        "4. Last 5 fill average is the average of the last 5 fills of gallons delivered by tank size at the customer "
-        "location.\n "
-        "Identify the worst assets as those with the lowest utilization percentages in each category. The worst "
-        "assets can "
-        "be calculated based on last fill utilization, last 5 fill utilization, or overall utilization according to "
-        "the prompt.\n "
-        "5. For asset types:\n"
-        "   - Rental Assets: Assets marked as 'rental' in the `asset_type` column.\n"
-        "   - Customer Assets: Assets marked as 'customer-owned'.\n"
-        "   - Delivery Assets: Assets related to delivery operations.\n"
-        "6. When calculating days between fills, use the `delivery_date` column.\n"
-        "7. For customer locations, use the `location` table.\n"
-        "8. For delivery volume buckets, use the ranges: 1-100, 100-500, 500-1000, 1000-5000, and 5000-10000 gallons.\n"
-        "9. If 'State' is requested, extract it from the `address` column using string manipulation.\n"
-        "10. For customer-related questions, refer to the cleaned customer locations table. Apply necessary join conditions "
-        "    and use data from the cleaned customers list if required.\n"
-        "11. Dry runs refer to unsuccessful fills where a driver attempted delivery but no fuel was delivered.\n"
-        "12. Do not use `LIMIT 5` in queries unless explicitly mentioned.\n"
-        "13. Avoid using aggregate functions (e.g., `AVG`) directly with window functions (e.g., `LAG`). Instead, calculate "
-        "    window function results in a subquery or CTE and apply the aggregate function in the outer query.\n"
-        "14. Ignore null values unless they are crucial for the analysis.\n"
-        "15. Basic filters for data analysis include:\n"
-        "    - **Date Range:** Filter data by daily, weekly, monthly, or custom date ranges.\n"
-        "    - **By Hubs:** Filter data by specific operational hubs or regions. Get the hub name from the `hubs` table by "
-        "      creating an indirect join between the `delivery_report` and `hubs` tables.\n"
-        "    - **By Drivers:** Filter data by specific driver IDs or names.\n"
-        "    - **By Customers:** Filter by specific customers or groups of customers.\n"
-        "    - **By Customer and Customer Locations:** Analyze data at the customer level and their respective locations.\n"
-        "    - **Volume Filters:** Use predefined delivery volume ranges (e.g., 1-100, 100-500 gallons).\n"
-        "    - **Status Filters:** Include or exclude records based on statuses like completed, pending, or canceled.\n"
-        "    - **Utilization Filters:** Narrow down records where utilization falls below a specified threshold.\n"
-        "    - **Null Handling:** Include or exclude null values based on the analysis requirements.\n"
-        "16. Enhance SQL queries by:\n"
-        "    - Using subqueries or Common Table Expressions (CTEs) to preprocess data in intermediary tables. "
-        "      Verify the accuracy of the joins before aggregating data.\n"
-        "    - Ensuring grouping is applied after all necessary joins to maintain accurate aggregated data.\n"
-        "17. For comparative analysis from the `delivery_report`:\n"
-        "    - **Total Stops:** Count the distinct `delivery_id` values per date.\n"
-        "    - **Total Gallons:** Sum the `volume` per date.\n"
-        "    - **Time Periods:**\n"
-        "        - Weekly: Compare current (last 7 days) vs. previous (7 days before that).\n"
-        "        - Monthly: Compare the current calendar month vs. the previous calendar month.\n"
-        "        - Quarterly: Compare the current calendar quarter vs. the previous calendar quarter.\n"
-    )
-    return context
+    context += f"\nQuestion: {question}\nGenerate an accurate SQL query that:\n"
+    context += """
+    1. Uses proper JOINs between tables
+    2. Handles NULL values appropriately
+    3. Includes correct aggregation functions when needed
+    4. Uses CASE statements for buckets/ranges
+    5. Only returns necessary columns
+    6. Uses proper date/time functions when needed
+    7. Includes appropriate WHERE clauses
+    8. Don't use LIMIT 5 in query unless mentioned.
+    Only provide the SQL query, nothing else."""
 
+    return context
 
 # Get tables and their columns
 @st.cache_data
@@ -124,7 +114,6 @@ def get_tables_info():
                 tables_info[schema][table] = columns
     return tables_info
 
-
 tables_info = get_tables_info()
 
 # Initialize session state
@@ -139,7 +128,7 @@ if "contextual_memory" not in st.session_state:
 st.title("KarmaOpsAI: Conversational Insights")
 
 # Create two columns for layout
-col1, col2 = st.columns([10, 1])
+col1, col2 = st.columns([10, 1])  # Adjust width ratio (memory icon smaller)
 
 # Column 2: Memory toggle
 with col2:
@@ -163,6 +152,7 @@ with col1:
 
                 if isinstance(query_result, str):
                     sql_query = query_result
+                    print(query_result)
                 else:
                     raise ValueError(f"Unexpected query result format: {query_result}")
 
@@ -174,28 +164,10 @@ with col1:
 
                     # Convert rows to JSON
                     json_result = [dict(zip(columns, row)) for row in rows]
-
-                    # Store the query data in the `training_data` table
-                    insert_query = text("""
-                        INSERT INTO public.training_data (user_query, generated_sql, query_results)
-                        VALUES (:user_query, :generated_sql, :query_results)
-                    """)
-                    try:
-                        connection.execute(insert_query, {
-                            "user_query": question,
-                            "generated_sql": sql_query,
-                            "query_results": json.dumps(json_result)  # Convert results to JSON
-                        })
-                        connection.commit()  # Explicitly commit the transaction
-                        st.success("Data saved to training_data table!")
-                    except Exception as e:
-                        st.error(f"Failed to save data to training_data table: {e}")
-
                     # Display the result
                     st.success("Query executed successfully!")
                     if json_result:
                         df = pd.DataFrame(json_result)
-
                         # Display table and visualization side by side
                         table_col, graph_col = st.columns(2)
 
