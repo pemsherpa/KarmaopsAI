@@ -1,4 +1,5 @@
 import streamlit as st
+from cachetools import TTLCache, cached
 from sqlalchemy import create_engine, inspect, text
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain.chains import create_sql_query_chain
@@ -13,7 +14,7 @@ import json
 st.set_page_config(layout="wide", page_title="KarmaOpsAI", page_icon=":bar_chart:")
 
 # Environment variables for database and OpenAI API key
-os.environ["OPENAI_API_KEY"] = "API KEY"
+os.environ["OPENAI_API_KEY"] = "API key"
 db_user = os.getenv("DB_USER", "postgres")
 db_password = os.getenv("DB_PASSWORD", "delusional")
 db_host = os.getenv("DB_HOST", "localhost")
@@ -27,75 +28,82 @@ db = SQLDatabase(engine)
 # Initialize the ChatOpenAI model
 llm = ChatOpenAI(model="gpt-4", temperature=0)
 
+cache = TTLCache(maxsize=100, ttl=300)
+
+
+@cached(cache)
+def run_query(sql_query):
+    """
+    Executes the SQL query and caches the result.
+    :param sql_query: The SQL query to execute.
+    :return: Result as a list of dictionaries.
+    """
+    with engine.connect() as connection:
+        result = connection.execute(text(sql_query)).fetchall()
+        columns = result.keys()
+        return [dict(zip(columns, row)) for row in result]
+
+
 # Function to create a contextual prompt
 def create_contextual_prompt(question, tables_info, contextual_memory):
-    context = "The database has the following tables and their columns:\n"
+    context = "The database contains the following relevant tables and their columns:\n"
     for schema, tables in tables_info.items():
         for table, columns in tables.items():
             context += f"Schema: {schema}, Table: {table}, Columns: {', '.join(columns)}\n"
 
     # Add predefined context and rules here
     context += """
-            Important calculation rules and definitions:
-            1. Utilization is Gallons delivered by Tank Size. Delivered volume should be taken from delivery_report. Don't take repetitive customer names and ignore null values.
-            2. Here based on last fill means last time total gallons was delivered by tank size.
-            3. Overall Utilization means Average of Total fill in the lifetime of the tank at the customer location by tank size.
-            4. Last 5 fill average is the last 5 fill average of gallons delivered by tank size in the customer location.
-                Identify the worst assets as the ones with the lowest utilization percentages in each category, 
-                the worst assets can be calculated on the basis of last fill utilization or last 5 fill utilization or overall utilization according to the prompt.
-            5. For asset types:
-               - Rental Assets: Assets marked as rental in the asset_type column
-               - Customer Assets: Assets marked as customer-owned
-               - Delivery Assets: Assets related to delivery operations
-            6. When calculating days between fills, use the delivery dates.
-            7. For customer locations, use the location table.
-            8. For delivery volume buckets use: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
-            9. If "State" is requested, extract it from the "address" column using string manipulation.
-            10. When something related to customers is asked, try to answer it from the cleaned customer locations table, apply join conditions however required, and see if you need anything from the cleaned customers list.
-            11. Dry runs are the unsuccessful fills like a driver went for delivery but didn't fill any fuel.
-            12. Don't use LIMIT 5 in queries unless mentioned.
-            13. Avoid using aggregate functions (like AVG) directly with window functions (like LAG). Instead, calculate window function results in a subquery or CTE and apply the aggregate function in the outer query.
-            14. Ignore null values if not crucial.
-            15. Basic filters refer to the criteria applied to narrow down data for analysis:
-                - **Date Range:** Apply filters to analyze data by daily, weekly, monthly, or custom date ranges.
-                - **By Hubs:** Filter data by specific operational hubs or regions.Get Hub's name from Hubs table for that try to create an indirect join of delivery report and hubs.
-                - **By Drivers:** Select records pertaining to specific drivers based on driver IDs or names.
-                - **By Customers:** Filter by specific customers or groups of customers.
-                - **By Customer and Customer Locations:** Analyze data at the customer level and their respective locations.
-                - **Volume Filters:** Use predefined delivery volume ranges (e.g., 1-100, 100-500 gallons).
-                - **Status Filters:** Exclude or include records based on statuses like completed, pending, or canceled.
-                - **Utilization Filters:** Narrow down records where utilization falls below a specified threshold.
-                - **Null Handling:** Exclude or include null values as needed based on the analysis requirement.
-            16. To enhance the SQL query:
-                - Use subqueries or Common Table Expressions (CTEs) to preprocess data in the intermediary table and verify the accuracy of the join before aggregating data.
-                - Ensure grouping is applied after all necessary joins to maintain the accuracy of the aggregated data.
-            17. Get data from delivery report for comparative Analysis Rules
-                - Total Stops = COUNT(DISTINCT delivery_id) per date
-                - Total Gallons = SUM(Volume) per date
-                - Time Periods:
-                    - Weekly: Current (last 7 days) vs Previous (7 days before that)
-                    - Monthly: Current calendar month vs Previous calendar month
-                    - Quarterly: Current calendar quarter vs Previous calendar quarter.
-            """
+    Follow the below given rules when needed.
+                    1. Utilization = Gallons Delivered / Tank Size (from delivery_report).
+                       - Exclude repetitive customer names and null values.
+                       - Last Fill Utilization: Based on the most recent delivery.
+                       - Overall Utilization: Average of all fills at a location over the tank's lifetime.
+                       - Last 5 Fill Average: Average gallons delivered over the last five fills at a location.
+                    2. Delivery Volume Buckets: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
+                    3. Days Between Fills: Calculated using delivery_date.
+                    4. Worst Assets: Based on utilization percentages (last fill, last 5 fill, or overall).
+                       - Asset Types:
+                         - Rental: Marked as "rental" in asset_type.
+                         - Customer-owned: Marked as "customer-owned" in asset_type.
+                         - Delivery Assets: Related to delivery operations.
+                    5. Dry Runs: Delivery attempts with no fuel delivered.
+                    6. Customer Locations: Use the location table. Join with the customer table as needed.
+                    - Basic Filters:
+                      - Date Range: Analyze daily, weekly, monthly, or custom ranges.
+                      - By Hubs: Use Hubs table with indirect joins.
+                      - By Drivers/Customers: Filter by IDs, names, or locations.
+                      - Volume: Use delivery volume buckets.
+                      - Utilization Threshold: Narrow results below a percentage.
+                    - Group By: Customer, location, and tank size for utilization metrics.
+                    1. Extract "State" from the address column using string operations.
+                    2. Join tables explicitly; avoid SELECT *.
+                    3. Use Common Table Expressions (CTEs) or subqueries for intermediate steps.
+                    4. Ensure grouping occurs after joins for accurate aggregates.
+                    5. Avoid LIMIT unless explicitly required.
+                    6. Comparative Analysis:
+                       - Total Stops: COUNT(DISTINCT delivery_id) per date.
+                       - Total Gallons: SUM(volume) per date.
+                       - Compare periods: Weekly, monthly, quarterly.
+
+                """
 
     if contextual_memory:
         context += "\nPrevious queries and answers:\n"
-        for i, memory in enumerate(contextual_memory):
+        for i, memory in enumerate(contextual_memory[-2:]):
             context += f"Query {i + 1}: {memory['question']}\nAnswer {i + 1}: {memory['answer']}\n"
 
-    context += f"\nQuestion: {question}\nGenerate an accurate SQL query that:\n"
+    context += f"\nQuestion: {question}\nGenerate a precise SQL query with the following conditions:\n"
     context += """
-        1. Uses proper JOINs between tables
-        2. Handles NULL values appropriately
-        3. Includes correct aggregation functions when needed
-        4. Uses CASE statements for buckets/ranges
-        5. Only returns necessary columns
-        6. Uses proper date/time functions when needed
-        7. Includes appropriate WHERE clauses
-        8. Don't use LIMIT 5 in query unless mentioned.
-        Only provide the SQL query, nothing else."""
+- Use proper JOINs and WHERE clauses.
+- Include aggregations where necessary.
+- Ensure accurate handling of null values.
+- Return only essential columns.
+- Don't use LIMIT 5 in query unless mentioned.
+Only provide the SQL query, nothing else.
+"""
 
     return context
+
 
 # Get tables and their columns
 @st.cache_data
@@ -115,6 +123,28 @@ def get_tables_info():
                 tables_info[schema][table] = columns
     return tables_info
 
+def predict_questions(contextual_memory):
+    """
+    Predicts potential questions based on previous queries and context.
+    :param contextual_memory: List of previous queries and answers.
+    :return: List of predicted questions.
+    """
+    if not contextual_memory:
+        return [
+            "What is the average utilization across all locations?",
+            "Show the top 5 customers by delivery volume.",
+            "How many dry runs occurred last month?",
+        ]
+
+    # Example: Use recent questions to generate similar ones
+    last_question = contextual_memory[-1]['question'] if contextual_memory else ""
+    predictions = [
+        f"Can you break down {last_question.split(' ')[-1]} by location?",
+        f"What trends are there in {last_question.split(' ')[-1]} over time?",
+        f"How does {last_question.split(' ')[-1]} vary by customer?",
+    ]
+    return predictions
+
 tables_info = get_tables_info()
 
 # Initialize session state
@@ -126,17 +156,54 @@ if "contextual_memory" not in st.session_state:
     st.session_state.contextual_memory = []  # List to store query-answer pairs for context
 
 # Streamlit app
-st.title(":bar_chart: KarmaOpsAI: Conversational Insights")
-st.markdown("### Your AI-powered analytics assistant")
+st.markdown(
+    """
+    <h1 style='text-align: center; color: #4CAF50;'>KarmaOpsAI</h1>
+    <h4 style='text-align: center;'>Your AI-powered analytics assistant</h4>
+    """,
+    unsafe_allow_html=True,
+)
 st.divider()
 
-# Create two columns for layout
-col1, col2 = st.columns([10, 1])  # Adjust width ratio (memory icon smaller)
+# Sidebar for settings and memory
+# Sidebar for settings and memory search
+import streamlit as st
 
-# Column 2: Memory toggle
-with col2:
-    if st.button("📝 Memory"):
-        st.session_state.show_memory = not st.session_state.show_memory
+with st.sidebar:
+    st.header("Settings")
+    st.text("Search and configure options below:")
+
+    # Memory search functionality
+    search_term = st.text_input("Search Memory:", placeholder="Enter keyword or question")
+
+    if st.session_state.memory:
+        if search_term:
+            st.subheader("Search Results")
+            matching_results = [
+                item for item in st.session_state.memory
+                if search_term.lower() in item['question'].lower()
+            ]
+
+            if matching_results:
+                for i, item in enumerate(matching_results):
+                    with st.expander(f"Query {i + 1}: {item['question']}"):
+                        st.write(item["dataframe"])
+                        st.plotly_chart(item["graph"], key=f"graph_search_{i}")
+            else:
+                st.info("No matches found in memory.")
+        else:
+            st.subheader("All Queries in Memory")
+            for i, item in enumerate(st.session_state.memory):
+                with st.expander(f"Query {i + 1}: {item['question']}"):
+                    st.write(item["dataframe"])
+                    st.plotly_chart(item["graph"], key=f"graph_all_{i}")
+    else:
+        st.info("No memory available. Run queries to populate memory.")
+
+predicted_questions = predict_questions(st.session_state.contextual_memory)
+
+# Main content layout
+col1, col2 = st.columns([11.9,0.1])
 
 # Column 1: Input and query results
 with col1:
@@ -220,17 +287,84 @@ with col1:
             except Exception as e:
                 st.error(f":x: Something went wrong. Please check your question or try again later.")
 
-# Toggle memory section visibility
-if st.session_state.show_memory:
-    st.subheader(":notebook_with_decorative_cover: Session Memory")
-    for i, item in enumerate(st.session_state.memory):
-        st.markdown(f"### Query {i + 1}: {item['question']}")
-        memory_table_col, memory_graph_col = st.columns(2)
+# Predict new questions after each query
+def predict_questions(contextual_memory):
+    """
+    Predicts potential questions based on previous queries and context.
+    :param contextual_memory: List of previous queries and answers.
+    :return: List of predicted questions.
+    """
+    if not contextual_memory:
+        return [
+            "What is the average utilization across all locations?",
+            "Show the top 5 customers by delivery volume.",
+            "How many dry runs occurred last month?",
+        ]
 
-        with memory_table_col:
-            st.subheader(f"Query {i + 1} Results")
-            st.dataframe(item['dataframe'])
+    # Example: Use recent questions to generate similar ones
+    last_question = contextual_memory[-1]['question'] if contextual_memory else ""
+    predictions = [
+        f"Can you break down {last_question.split(' ')[-1]} by location?",
+        f"What trends are there in {last_question.split(' ')[-1]} over time?",
+        f"How does {last_question.split(' ')[-1]} vary by customer?",
+    ]
+    return predictions
 
-        with memory_graph_col:
-            st.subheader(f"Query {i + 1} Visualization")
-            st.plotly_chart(item['graph'], key=f"graph_{i}")
+
+# Dynamically generate new suggestions based on the memory
+predicted_questions = predict_questions(st.session_state.contextual_memory)
+
+# Suggested Queries Section
+st.subheader("Suggested Queries")
+cols = st.columns(3)
+
+for i, predicted_question in enumerate(predicted_questions):
+    with cols[i]:
+        if st.button(predicted_question, key=f"predicted_{i}"):
+            # Run the query directly when a suggested question is clicked
+            st.session_state['query_to_run'] = predicted_question
+            st.experimental_rerun()
+
+# Handle the execution of the suggested query
+if "query_to_run" in st.session_state:
+    suggested_question = st.session_state.pop('query_to_run')
+    with st.spinner("Running suggested query..."):
+        prompt = create_contextual_prompt(
+            suggested_question, tables_info, st.session_state.contextual_memory
+        )
+        try:
+            # Generate and execute the query
+            generate_query = create_sql_query_chain(llm, db)
+            query_result = generate_query.invoke({"question": prompt})
+
+            if isinstance(query_result, str):
+                sql_query = query_result
+            else:
+                raise ValueError("Unexpected query result format")
+
+            with engine.connect() as connection:
+                result = connection.execute(text(sql_query))
+                rows = result.fetchall()
+                columns = result.keys()
+
+                json_result = [dict(zip(columns, row)) for row in rows]
+                if json_result:
+                    df = pd.DataFrame(json_result)
+                    st.write("Query Results")
+                    st.dataframe(df)
+                else:
+                    st.warning("No results found for the query.")
+        except Exception as e:
+            st.error(f"Error while running the query: {e}")
+
+
+# Footer
+st.divider()
+st.markdown(
+    """
+    <footer style='text-align: center; font-size: small;'>
+        © 2025 KarmaOpsAI.
+    </footer>
+    """,
+    unsafe_allow_html=True,
+)
