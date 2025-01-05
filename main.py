@@ -14,7 +14,7 @@ import json
 st.set_page_config(layout="wide", page_title="KarmaOpsAI", page_icon=":bar_chart:")
 
 # Environment variables for database and OpenAI API key
-os.environ["OPENAI_API_KEY"] = "API key"
+os.environ["OPENAI_API_KEY"] = "API KEY"
 db_user = os.getenv("DB_USER", "postgres")
 db_password = os.getenv("DB_PASSWORD", "delusional")
 db_host = os.getenv("DB_HOST", "localhost")
@@ -54,11 +54,10 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
     # Add predefined context and rules here
     context += """
     Follow the below given rules when needed.
-                    1. Utilization = Gallons Delivered / Tank Size (from delivery_report).
+                    1. Utilization = Volume Delivered(from delivery_report) divided by Tank Size(from moffitt_assets_report) .
                        - Exclude repetitive customer names and null values.
                        - Last Fill Utilization: Based on the most recent delivery.
                        - Overall Utilization: Average of all fills at a location over the tank's lifetime.
-                       - Last 5 Fill Average: Average gallons delivered over the last five fills at a location.
                     2. Delivery Volume Buckets: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons.
                     3. Days Between Fills: Calculated using delivery_date.
                     4. Worst Assets: Based on utilization percentages (last fill, last 5 fill, or overall).
@@ -358,7 +357,6 @@ if "query_to_run" in st.session_state:
             st.error(f"Error while running the query: {e}")
 
 
-# Footer
 st.divider()
 st.markdown(
     """
