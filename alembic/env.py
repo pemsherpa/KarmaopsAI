@@ -1,6 +1,5 @@
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 from alembic import context
 from dotenv import load_dotenv
 import os
@@ -20,17 +19,12 @@ config.set_main_option('sqlalchemy.url', os.getenv('DATABASE_URL'))
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-from my_project.models import Base  # Update with your project's actual path
+# Import the Base class from your models.py to access metadata
+from models import Base  # Update with the correct path to your models.py
+
+# Set the target_metadata to the Base.metadata
 target_metadata = Base.metadata
 
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode.
