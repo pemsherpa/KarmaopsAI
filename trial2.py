@@ -13,7 +13,7 @@ import json
 st.set_page_config(layout="wide", page_title="KarmaOpsAI", page_icon=":bar_chart:")
 
 # Environment variables for database and OpenAI API key
-os.environ["OPENAI_API_KEY"] = os.getenv('OPEN_API_KEY')
+os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 db_user = os.getenv("DB_USER", "postgres")
 db_password = os.getenv("DB_PASSWORD", "delusional")
 db_host = os.getenv("DB_HOST", "localhost")

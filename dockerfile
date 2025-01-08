@@ -24,5 +24,8 @@ COPY . .
 # Expose the port Streamlit runs on
 EXPOSE 8501
 
+# Make the entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
 # Command to run the Streamlit application
-CMD ["streamlit", "run", "main.py"]
+CMD ["./entrypoint.sh"]
