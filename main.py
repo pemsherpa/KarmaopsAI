@@ -66,10 +66,9 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
        - Last Fill: Most recent delivery
        - Overall: Lifetime average
        - Last 5: Average of last 5 deliveries
-    2. Assets: rental, customer-owned
+    2. Assets types [ownership column]: rental, customer-owned
     3. Volumes: 1-100, 100-500, 500-1000, 1000-5000, 5000-10000 gallons
     4. Key Points:
-       - Join on ship_to_erp_id
        - Dry runs: Gallons = 0
        - Use CTEs for complex calculations
        - Handle NULLs appropriately
