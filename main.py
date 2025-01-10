@@ -62,7 +62,7 @@ def create_contextual_prompt(question, tables_info, contextual_memory):
     # Core rules in condensed format
     context += """
     Calculations and Rules:
-    1. Utilization: (Gallons/Tank)*100%
+    1. Utilization: (Gallons/Tank size)*100% [Gallons = Volume from delivery_order_report and Tank size from moffitt_assets_report]
        - Last Fill: Most recent delivery
        - Overall: Lifetime average
        - Last 5: Average of last 5 deliveries
